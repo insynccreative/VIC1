@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Community": {
+      "title": "Community",
+      "description": "A sovereign workspace for a community.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "description": { "type": "string" },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "blockContacts": { "type": "boolean", "description": "If true, phone numbers and emails are masked." },
+            "privateMessaging": { "type": "string", "enum": ["all", "admin-only", "none"] }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "settings"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "A user's membership in a community.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "moderator", "member", "guest"] },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "A messaging topic within a community.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message.",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["content", "authorId", "status"]
+    }
+  },
+  "firestore": {
+    "/communities": {
+      "schema": "Community",
+      "description": "Top-level communities."
+    },
+    "/communities/{communityId}/members": {
+      "schema": "Member",
+      "description": "Members of a community."
+    },
+    "/communities/{communityId}/channels": {
+      "schema": "Channel",
+      "description": "Channels in a community."
+    },
+    "/communities/{communityId}/channels/{channelId}/messages": {
+      "schema": "Message",
+      "description": "Messages in a channel."
+    }
+  }
+}

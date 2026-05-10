@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // -------------------------------------------------------------------------
+    // GLOBAL HELPERS
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // -------------------------------------------------------------------------
+    // COMMUNITY HELPERS
+    // -------------------------------------------------------------------------
+    function getMember(communityId, userId) {
+      return get(/databases/$(database)/documents/communities/$(communityId)/members/$(userId));
+    }
+
+    function isMember(communityId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/communities/$(communityId)/members/$(request.auth.uid));
+    }
+
+    function getRole(communityId) {
+      return getMember(communityId, request.auth.uid).data.role;
+    }
+
+    function isAdmin(communityId) {
+      return isMember(communityId) && (getRole(communityId) == 'admin' || getRole(communityId) == 'moderator');
+    }
+
+    // -------------------------------------------------------------------------
+    // DEFAULT DENY
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // ENTITY: COMMUNITIES
+    // -------------------------------------------------------------------------
+    match /communities/{communityId} {
+      allow list: if isSignedIn();
+      allow get: if isMember(communityId);
+      
+      function isValidCommunity(data) {
+        return data.name is string && data.name.size() > 0 && data.name.size() <= 100
+            && data.ownerId == request.auth.uid
+            && data.settings.blockContacts is bool
+            && data.settings.privateMessaging in ['all', 'admin-only', 'none'];
+      }
+
+      allow create: if isSignedIn() && isValidCommunity(incoming());
+      allow update: if isAdmin(communityId) && isValidCommunity(incoming());
+      allow delete: if isUser(existing().ownerId);
+
+      // -----------------------------------------------------------------------
+      // ENTITY: MEMBERS
+      // -----------------------------------------------------------------------
+      match /members/{memberId} {
+        // Members list is visible to all members for mention/display
+        allow read: if isMember(communityId);
+        
+        function isValidMember(data) {
+          return data.userId is string 
+              && data.role in ['admin', 'moderator', 'member', 'guest']
+              && (data.role == 'admin' ? data.userId == /databases/$(database)/documents/communities/$(communityId).ownerId : true);
+        }
+
+        // Only owner or existing admin can add/edit members
+        allow create: if isSignedIn() && (
+          (memberId == request.auth.uid && !exists(/databases/$(database)/documents/communities/$(communityId))) || // Self-join during creation
+          isAdmin(communityId)
+        );
+        allow update: if isAdmin(communityId);
+        allow delete: if isAdmin(communityId) && memberId != /databases/$(database)/documents/communities/$(communityId).ownerId;
+      }
+
+      // -----------------------------------------------------------------------
+      // ENTITY: CHANNELS
+      // -----------------------------------------------------------------------
+      match /channels/{channelId} {
+        allow read: if isMember(communityId);
+        
+        function isValidChannel(data) {
+          return data.name is string && data.name.size() > 0 && data.name.size() <= 50;
+        }
+
+        allow create, update: if isAdmin(communityId) && isValidChannel(incoming());
+        allow delete: if isAdmin(communityId);
+
+        // ---------------------------------------------------------------------
+        // ENTITY: MESSAGES
+        // ---------------------------------------------------------------------
+        match /messages/{messageId} {
+          // List: Can see approved messages, or all if admin
+          allow list: if isMember(communityId) && (isAdmin(communityId) || resource.data.status == 'approved');
+          allow get: if isMember(communityId) && (isAdmin(communityId) || resource.data.status == 'approved');
+
+          function isValidMessage(data) {
+            return data.content is string && data.content.size() > 0 && data.content.size() <= 2000
+                && data.authorId == request.auth.uid
+                && data.status in ['pending', 'approved', 'rejected'];
+          }
+
+          allow create: if isMember(communityId) 
+              && isValidMessage(incoming())
+              && (isAdmin(communityId) ? incoming().status == 'approved' : incoming().status == 'pending');
+
+          allow update: if isAdmin(communityId)
+              && isValidMessage(incoming())
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status']); // Only allow status updates from queue
+
+          allow delete: if isAdmin(communityId) || isUser(existing().authorId);
+        }
+      }
+    }
+    
+    // Connection test path
+    match /_connection_test/{docId} {
+      allow read: if true;
+    }
+  }
+}
